@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router';
 import { supabase } from '../lib/supabase';
 import { apiCall } from '../lib/supabase';
@@ -10,6 +10,54 @@ export default function Login() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    const searchParams = new URLSearchParams(window.location.search);
+    const oauthProvider = searchParams.get('oauth');
+
+    if (oauthProvider === 'facebook') {
+      handleOAuthSession(searchParams.get('role') === 'tutor' ? 'tutor' : 'student');
+    }
+  }, []);
+
+  const handleOAuthSession = async (role: 'student' | 'tutor') => {
+    try {
+      const { data: sessionData } = await supabase.auth.getSession();
+      if (!sessionData.session) return;
+
+      await apiCall('/auth/sync-profile', {
+        method: 'POST',
+        body: JSON.stringify({ role }),
+      });
+
+      const { profile } = await apiCall('/profile');
+
+      if (profile.role === 'student') {
+        navigate('/student');
+      } else if (profile.role === 'tutor') {
+        navigate('/tutor');
+      } else if (profile.role === 'admin') {
+        navigate('/admin');
+      }
+    } catch (error: any) {
+      console.error('OAuth login error:', error);
+      toast.error(error.message || 'Failed to login with Facebook');
+    }
+  };
+
+  const handleFacebookLogin = async () => {
+    try {
+      const redirectTo = `${window.location.origin}/login?oauth=facebook&role=student`;
+      const { error } = await supabase.auth.signInWithOAuth({
+        provider: 'facebook',
+        options: { redirectTo },
+      });
+      if (error) throw error;
+    } catch (error: any) {
+      console.error('Facebook login error:', error);
+      toast.error(error.message || 'Failed to start Facebook login');
+    }
+  };
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -98,6 +146,14 @@ export default function Login() {
           >
             <LogIn className="size-5" />
             {loading ? 'Logging in...' : 'Login'}
+          </button>
+
+          <button
+            type="button"
+            onClick={handleFacebookLogin}
+            className="w-full bg-[#1877F2] text-white py-3 rounded-lg font-semibold hover:opacity-90 transition"
+          >
+            Continue with Facebook
           </button>
         </form>
 

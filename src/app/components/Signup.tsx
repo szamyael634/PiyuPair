@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router';
+import { supabase } from '../lib/supabase';
 import { apiCall } from '../lib/supabase';
 import { GraduationCap, UserPlus } from 'lucide-react';
 import { toast } from 'sonner';
@@ -66,6 +67,21 @@ export default function Signup() {
       toast.error(error.message || 'Failed to create account');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleFacebookSignup = async () => {
+    try {
+      const role = formData.role === 'tutor' ? 'tutor' : 'student';
+      const redirectTo = `${window.location.origin}/login?oauth=facebook&role=${role}`;
+      const { error } = await supabase.auth.signInWithOAuth({
+        provider: 'facebook',
+        options: { redirectTo },
+      });
+      if (error) throw error;
+    } catch (error: any) {
+      console.error('Facebook signup error:', error);
+      toast.error(error.message || 'Failed to start Facebook signup');
     }
   };
 
@@ -241,6 +257,14 @@ export default function Signup() {
           >
             <UserPlus className="size-5" />
             {loading ? 'Creating Account...' : 'Create Account'}
+          </button>
+
+          <button
+            type="button"
+            onClick={handleFacebookSignup}
+            className="w-full bg-[#1877F2] text-white py-3 rounded-lg font-semibold hover:opacity-90 transition"
+          >
+            Sign up with Facebook
           </button>
         </form>
 

@@ -131,6 +131,71 @@ app.post('/make-server-824d015e/signup', async (c) => {
   }
 })
 
+app.post('/make-server-824d015e/auth/sync-profile', async (c) => {
+  try {
+    const { user } = await getUserFromToken(c.req.raw)
+    if (!user) {
+      return c.json({ error: 'Unauthorized' }, 401)
+    }
+
+    const body = await c.req.json().catch(() => ({}))
+    const requestedRole = body?.role === 'tutor' ? 'tutor' : 'student'
+
+    const existingProfile = await kv.get(`profile:${user.id}`)
+    if (existingProfile) {
+      return c.json({ profile: existingProfile, created: false })
+    }
+
+    const derivedName =
+      user.user_metadata?.name ||
+      user.user_metadata?.full_name ||
+      user.email?.split('@')[0] ||
+      'User'
+
+    const profile = {
+      id: user.id,
+      email: user.email,
+      name: derivedName,
+      role: requestedRole,
+      phone: '',
+      bio: '',
+      createdAt: new Date().toISOString(),
+      approved: requestedRole === 'student',
+      ...(requestedRole === 'tutor' && {
+        subjects: [],
+        hourlyRate: 0,
+        qualifications: [],
+        experience: '',
+        rating: 0,
+        totalSessions: 0,
+        totalEarnings: 0,
+        discountOffered: 0,
+      }),
+      ...(requestedRole === 'student' && {
+        enrolledSubjects: [],
+        currentGrade: '',
+      }),
+    }
+
+    await kv.set(`profile:${user.id}`, profile)
+
+    if (requestedRole === 'tutor') {
+      await kv.set(`pending_approval:${user.id}`, {
+        userId: user.id,
+        type: 'tutor_signup',
+        profile,
+        createdAt: new Date().toISOString(),
+        status: 'pending',
+      })
+    }
+
+    return c.json({ profile, created: true })
+  } catch (error) {
+    console.log(`Error syncing OAuth profile: ${error}`)
+    return c.json({ error: 'Failed to sync profile' }, 500)
+  }
+})
+
 // ============= PROFILE ROUTES =============
 
 app.get('/make-server-824d015e/profile', async (c) => {
