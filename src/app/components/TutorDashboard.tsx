@@ -1,8 +1,9 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router';
 import { supabase, apiCall } from '../lib/supabase';
-import { GraduationCap, DollarSign, Users, Star, MessageCircle, LogOut, CheckCircle, XCircle, Calendar } from 'lucide-react';
+import { GraduationCap, DollarSign, Users, Star, MessageCircle, LogOut, CheckCircle, XCircle, Calendar, Pencil } from 'lucide-react';
 import { toast } from 'sonner';
+import EditProfileModal from './EditProfileModal';
 
 export default function TutorDashboard() {
   const navigate = useNavigate();
@@ -10,6 +11,7 @@ export default function TutorDashboard() {
   const [applications, setApplications] = useState<any[]>([]);
   const [sessions, setSessions] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [showEditProfile, setShowEditProfile] = useState(false);
 
   useEffect(() => {
     loadData();
@@ -82,12 +84,28 @@ export default function TutorDashboard() {
           <p className="text-gray-600 mb-6">
             Your tutor application is being reviewed by our admin team. You'll be notified once approved.
           </p>
-          <button
-            onClick={handleLogout}
-            className="px-6 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700 transition"
-          >
-            Logout
-          </button>
+          <div className="flex gap-3 justify-center">
+            <button
+              onClick={() => setShowEditProfile(true)}
+              className="px-6 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition"
+            >
+              Edit Profile
+            </button>
+            <button
+              onClick={handleLogout}
+              className="px-6 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700 transition"
+            >
+              Logout
+            </button>
+          </div>
+
+          {showEditProfile && profile && (
+            <EditProfileModal
+              profile={profile}
+              onClose={() => setShowEditProfile(false)}
+              onSuccess={loadData}
+            />
+          )}
         </div>
       </div>
     );
@@ -107,6 +125,13 @@ export default function TutorDashboard() {
               <span className="text-2xl font-bold text-gray-800">Smart Tutoring</span>
             </div>
             <div className="flex items-center gap-4">
+              <button
+                onClick={() => setShowEditProfile(true)}
+                className="flex items-center gap-2 rounded-lg border border-gray-200 px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
+              >
+                <Pencil className="size-4" />
+                Edit Profile
+              </button>
               <button
                 onClick={() => navigate('/messages')}
                 className="p-2 hover:bg-gray-100 rounded-lg transition"
@@ -201,6 +226,14 @@ export default function TutorDashboard() {
           )}
         </div>
       </div>
+
+      {showEditProfile && profile && (
+        <EditProfileModal
+          profile={profile}
+          onClose={() => setShowEditProfile(false)}
+          onSuccess={loadData}
+        />
+      )}
     </div>
   );
 }

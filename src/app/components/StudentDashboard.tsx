@@ -1,8 +1,9 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router';
 import { supabase, apiCall } from '../lib/supabase';
-import { GraduationCap, Upload, FileText, TrendingUp, Search, MessageCircle, Video, LogOut, Star } from 'lucide-react';
+import { GraduationCap, Upload, FileText, TrendingUp, Search, MessageCircle, Video, LogOut, Star, Pencil } from 'lucide-react';
 import { toast } from 'sonner';
+import EditProfileModal from './EditProfileModal';
 
 export default function StudentDashboard() {
   const navigate = useNavigate();
@@ -12,6 +13,7 @@ export default function StudentDashboard() {
   const [loading, setLoading] = useState(true);
   const [showUploadCert, setShowUploadCert] = useState(false);
   const [showUploadGrade, setShowUploadGrade] = useState(false);
+  const [showEditProfile, setShowEditProfile] = useState(false);
 
   useEffect(() => {
     loadData();
@@ -69,6 +71,13 @@ export default function StudentDashboard() {
               <span className="text-2xl font-bold text-gray-800">Smart Tutoring</span>
             </div>
             <div className="flex items-center gap-4">
+              <button
+                onClick={() => setShowEditProfile(true)}
+                className="flex items-center gap-2 rounded-lg border border-gray-200 px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
+              >
+                <Pencil className="size-4" />
+                Edit Profile
+              </button>
               <button
                 onClick={() => navigate('/messages')}
                 className="p-2 hover:bg-gray-100 rounded-lg transition"
@@ -190,6 +199,14 @@ export default function StudentDashboard() {
       {/* Upload Grade Modal */}
       {showUploadGrade && (
         <UploadGradeModal onClose={() => setShowUploadGrade(false)} onSuccess={loadData} />
+      )}
+
+      {showEditProfile && profile && (
+        <EditProfileModal
+          profile={profile}
+          onClose={() => setShowEditProfile(false)}
+          onSuccess={loadData}
+        />
       )}
     </div>
   );
