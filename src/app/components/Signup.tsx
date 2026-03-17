@@ -290,7 +290,7 @@ export default function Signup() {
       const email = formData.email.trim().toLowerCase();
       const redirectTo = `${window.location.origin}/signup`;
 
-      const { error: signUpError } = await supabase.auth.signUp({
+      const { data: signUpData, error: signUpError } = await supabase.auth.signUp({
         email,
         password: formData.password,
         options: {
@@ -303,17 +303,27 @@ export default function Signup() {
       });
 
       if (signUpError) {
-        const isAlreadyRegistered = String(signUpError.message || '').toLowerCase().includes('already');
-        if (!isAlreadyRegistered) throw signUpError;
+        throw signUpError;
+      }
 
-        const { error: resendError } = await supabase.auth.resend({
-          type: 'signup',
-          email,
-          options: {
-            emailRedirectTo: redirectTo,
-          },
-        });
-        if (resendError) throw resendError;
+      const isAutoConfirmed = Boolean(signUpData.user?.email_confirmed_at);
+      if (isAutoConfirmed) {
+        setVerificationSent(true);
+        setEmailVerified(true);
+        toast.success('Email is already verified for this account.');
+        return;
+      }
+
+      const { error: resendError } = await supabase.auth.resend({
+        type: 'signup',
+        email,
+        options: {
+          emailRedirectTo: redirectTo,
+        },
+      });
+
+      if (resendError) {
+        throw resendError;
       }
 
       setVerificationSent(true);
