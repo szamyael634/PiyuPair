@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router';
 import { supabase } from '../lib/supabase';
 import { apiCall } from '../lib/supabase';
@@ -57,6 +57,9 @@ export default function Signup() {
   const [loading, setLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
+  const [verificationSent, setVerificationSent] = useState(false);
+  const [emailVerified, setEmailVerified] = useState(false);
+  const [sendingVerification, setSendingVerification] = useState(false);
   const [formData, setFormData] = useState({
     role: 'student',
     firstName: '',
@@ -65,7 +68,6 @@ export default function Signup() {
     suffix: '',
     phone: '',
     email: '',
-    confirmEmail: '',
     password: '',
     confirmPassword: '',
     bio: '',
@@ -86,7 +88,27 @@ export default function Signup() {
 
   const passwordStrength = useMemo(() => getPasswordStrength(formData.password), [formData.password]);
 
+  useEffect(() => {
+    const syncVerificationState = async () => {
+      const { data: userData } = await supabase.auth.getUser();
+      const currentUser = userData.user;
+      const isVerified = Boolean(
+        currentUser?.email_confirmed_at
+        && currentUser?.email
+        && currentUser.email.toLowerCase() === formData.email.trim().toLowerCase()
+      );
+      setEmailVerified(isVerified);
+      if (isVerified) setVerificationSent(true);
+    };
+
+    void syncVerificationState();
+  }, [formData.email]);
+
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => {
+    if (e.target.name === 'email') {
+      setVerificationSent(false);
+      setEmailVerified(false);
+    }
     setFormData({ ...formData, [e.target.name]: e.target.value });
   };
 
@@ -134,13 +156,18 @@ export default function Signup() {
       return false;
     }
 
-    if (!formData.email.trim() || !formData.confirmEmail.trim()) {
-      toast.error('Email and verify email are required.');
+    if (!formData.email.trim()) {
+      toast.error('Email is required.');
       return false;
     }
 
-    if (formData.email.trim().toLowerCase() !== formData.confirmEmail.trim().toLowerCase()) {
-      toast.error('Email addresses do not match.');
+    if (!verificationSent) {
+      toast.error('Please send a verification link to your email first.');
+      return false;
+    }
+
+    if (!emailVerified) {
+      toast.error('Please verify your email using the link sent to your inbox.');
       return false;
     }
 
@@ -209,8 +236,6 @@ export default function Signup() {
         }));
 
       const payload = {
-        email: formData.email.trim(),
-        password: formData.password,
         name: fullName,
         firstName: formData.firstName.trim(),
         middleName: formData.middleName.trim(),
@@ -228,7 +253,7 @@ export default function Signup() {
         }),
       };
 
-      const response = await apiCall('/signup', {
+      const response = await apiCall('/signup/complete', {
         method: 'POST',
         body: JSON.stringify(payload),
       });
@@ -245,6 +270,59 @@ export default function Signup() {
       toast.error(error.message || 'Failed to create account');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleSendVerificationLink = async () => {
+    if (!formData.email.trim()) {
+      toast.error('Enter your email first.');
+      return;
+    }
+
+    if (!formData.password || formData.password.length < 8) {
+      toast.error('Enter a valid password before sending verification.');
+      return;
+    }
+
+    setSendingVerification(true);
+
+    try {
+      const email = formData.email.trim().toLowerCase();
+      const redirectTo = `${window.location.origin}/signup`;
+
+      const { error: signUpError } = await supabase.auth.signUp({
+        email,
+        password: formData.password,
+        options: {
+          emailRedirectTo: redirectTo,
+          data: {
+            role: formData.role,
+            name: fullName || formData.firstName,
+          },
+        },
+      });
+
+      if (signUpError) {
+        const isAlreadyRegistered = String(signUpError.message || '').toLowerCase().includes('already');
+        if (!isAlreadyRegistered) throw signUpError;
+
+        const { error: resendError } = await supabase.auth.resend({
+          type: 'signup',
+          email,
+          options: {
+            emailRedirectTo: redirectTo,
+          },
+        });
+        if (resendError) throw resendError;
+      }
+
+      setVerificationSent(true);
+      toast.success('Verification link sent. Please check your email inbox.');
+    } catch (error: any) {
+      console.error('Verification link error:', error);
+      toast.error(error.message || 'Failed to send verification link');
+    } finally {
+      setSendingVerification(false);
     }
   };
 
@@ -368,17 +446,23 @@ export default function Signup() {
                 />
               </div>
 
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">Verify Email Address</label>
-                <input
-                  type="email"
-                  name="confirmEmail"
-                  value={formData.confirmEmail}
-                  onChange={handleChange}
-                  required
-                  className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                  placeholder="Re-enter your email"
-                />
+              <div className="rounded-lg border border-blue-100 bg-blue-50 p-4">
+                <p className="text-sm text-blue-900 mb-3">
+                  Email verification is required. We will send a verification link to your email address.
+                </p>
+                <div className="flex flex-col sm:flex-row sm:items-center gap-3">
+                  <button
+                    type="button"
+                    onClick={handleSendVerificationLink}
+                    disabled={sendingVerification}
+                    className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition disabled:opacity-50"
+                  >
+                    {sendingVerification ? 'Sending...' : 'Send Verification Link'}
+                  </button>
+                  <span className={`text-sm ${emailVerified ? 'text-green-700' : 'text-gray-600'}`}>
+                    {emailVerified ? 'Email verified' : verificationSent ? 'Verification link sent. Check your inbox.' : 'Verification not sent yet.'}
+                  </span>
+                </div>
               </div>
 
               <div>

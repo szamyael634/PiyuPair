@@ -53,6 +53,51 @@ async function ensureCredentialsBucket() {
   }
 }
 
+async function uploadCredentialDocuments(userId: string, credentialUploads: any[] = []) {
+  const uploadedCredentials: any[] = []
+  if (!Array.isArray(credentialUploads) || credentialUploads.length === 0) {
+    return uploadedCredentials
+  }
+
+  await ensureCredentialsBucket()
+
+  for (const document of credentialUploads) {
+    if (!document?.base64Data || !document?.fileName) continue
+
+    const safeFileName = sanitizeFileName(document.fileName)
+    const filePath = `${userId}/${Date.now()}_${document.key || 'credential'}_${safeFileName}`
+    const fileBytes = decodeBase64ToUint8Array(document.base64Data)
+
+    const { error: uploadError } = await supabase.storage
+      .from(CREDENTIALS_BUCKET)
+      .upload(filePath, fileBytes, {
+        contentType: document.fileType || 'application/octet-stream',
+        upsert: false,
+      })
+
+    if (uploadError) {
+      console.log(`Error uploading credential ${safeFileName}: ${uploadError.message}`)
+      continue
+    }
+
+    const { data: publicUrlData } = supabase.storage.from(CREDENTIALS_BUCKET).getPublicUrl(filePath)
+    uploadedCredentials.push({
+      key: document.key,
+      label: document.label,
+      required: Boolean(document.required),
+      fileName: document.fileName,
+      fileType: document.fileType,
+      fileSize: document.fileSize,
+      bucket: CREDENTIALS_BUCKET,
+      path: filePath,
+      url: publicUrlData.publicUrl,
+      uploadedAt: new Date().toISOString(),
+    })
+  }
+
+  return uploadedCredentials
+}
+
 function clamp(value: number, min: number, max: number) {
   return Math.max(min, Math.min(max, value))
 }
@@ -257,45 +302,7 @@ app.post('/make-server-824d015e/signup', async (c) => {
 
     // Store additional user profile data in KV store
     const userId = data.user.id
-    const uploadedCredentials = []
-
-    if (Array.isArray(credentialUploads) && credentialUploads.length > 0) {
-      await ensureCredentialsBucket()
-
-      for (const document of credentialUploads) {
-        if (!document?.base64Data || !document?.fileName) continue
-
-        const safeFileName = sanitizeFileName(document.fileName)
-        const filePath = `${userId}/${Date.now()}_${document.key || 'credential'}_${safeFileName}`
-        const fileBytes = decodeBase64ToUint8Array(document.base64Data)
-
-        const { error: uploadError } = await supabase.storage
-          .from(CREDENTIALS_BUCKET)
-          .upload(filePath, fileBytes, {
-            contentType: document.fileType || 'application/octet-stream',
-            upsert: false,
-          })
-
-        if (uploadError) {
-          console.log(`Error uploading credential ${safeFileName}: ${uploadError.message}`)
-          continue
-        }
-
-        const { data: publicUrlData } = supabase.storage.from(CREDENTIALS_BUCKET).getPublicUrl(filePath)
-        uploadedCredentials.push({
-          key: document.key,
-          label: document.label,
-          required: Boolean(document.required),
-          fileName: document.fileName,
-          fileType: document.fileType,
-          fileSize: document.fileSize,
-          bucket: CREDENTIALS_BUCKET,
-          path: filePath,
-          url: publicUrlData.publicUrl,
-          uploadedAt: new Date().toISOString(),
-        })
-      }
-    }
+    const uploadedCredentials = await uploadCredentialDocuments(userId, credentialUploads)
 
     const profile = {
       id: userId,
@@ -348,6 +355,98 @@ app.post('/make-server-824d015e/signup', async (c) => {
   } catch (error) {
     console.log(`Error in signup route: ${error}`)
     return c.json({ error: 'Signup failed' }, 500)
+  }
+})
+
+app.post('/make-server-824d015e/signup/complete', async (c) => {
+  try {
+    const { user } = await getUserFromToken(c.req.raw)
+    if (!user) {
+      return c.json({ error: 'Unauthorized' }, 401)
+    }
+
+    if (!user.email_confirmed_at) {
+      return c.json({ error: 'Email must be verified first' }, 400)
+    }
+
+    const body = await c.req.json()
+    const {
+      name,
+      role,
+      phone,
+      subjects,
+      bio,
+      hourlyRate,
+      qualifications,
+      experience,
+      firstName,
+      middleName,
+      lastName,
+      suffix,
+      credentialUploads,
+    } = body
+
+    const existingProfile = await kv.get(`profile:${user.id}`)
+    const uploadedCredentials = await uploadCredentialDocuments(user.id, credentialUploads)
+
+    const mergedCredentials = [
+      ...(Array.isArray(existingProfile?.credentials) ? existingProfile.credentials : []),
+      ...uploadedCredentials,
+    ]
+
+    const profile = {
+      ...(existingProfile || {}),
+      id: user.id,
+      email: user.email,
+      name,
+      firstName: firstName || '',
+      middleName: middleName || '',
+      lastName: lastName || '',
+      suffix: suffix || '',
+      role,
+      phone,
+      bio: bio || '',
+      credentials: mergedCredentials,
+      createdAt: existingProfile?.createdAt || new Date().toISOString(),
+      approved: role === 'student' ? true : false,
+      ...(role === 'tutor' && {
+        subjects: subjects || [],
+        hourlyRate: hourlyRate || 0,
+        qualifications: qualifications || [],
+        experience: experience || '',
+        rating: existingProfile?.rating || 0,
+        totalSessions: existingProfile?.totalSessions || 0,
+        totalEarnings: existingProfile?.totalEarnings || 0,
+        discountOffered: existingProfile?.discountOffered || 0,
+      }),
+      ...(role === 'student' && {
+        enrolledSubjects: existingProfile?.enrolledSubjects || [],
+        currentGrade: existingProfile?.currentGrade || '',
+      }),
+    }
+
+    await kv.set(`profile:${user.id}`, profile)
+
+    if (role === 'tutor') {
+      const existingApproval = await kv.get(`pending_approval:${user.id}`)
+      await kv.set(`pending_approval:${user.id}`, {
+        ...(existingApproval || {}),
+        userId: user.id,
+        type: 'tutor_signup',
+        profile,
+        createdAt: existingApproval?.createdAt || new Date().toISOString(),
+        status: existingApproval?.status === 'approved' ? 'approved' : 'pending',
+      })
+    }
+
+    return c.json({
+      message: 'Signup completed successfully',
+      userId: user.id,
+      needsApproval: role === 'tutor',
+    })
+  } catch (error) {
+    console.log(`Error completing signup: ${error}`)
+    return c.json({ error: 'Failed to complete signup' }, 500)
   }
 })
 
