@@ -15,6 +15,40 @@ const supabase = createClient(
   Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '',
 )
 
+function clamp(value: number, min: number, max: number) {
+  return Math.max(min, Math.min(max, value))
+}
+
+function calculateMatchingScore(student: any, tutor: any, subject?: string) {
+  let score = 40
+
+  // Strongly prioritize subject fit.
+  if (subject && Array.isArray(tutor?.subjects) && tutor.subjects.includes(subject)) {
+    score += 30
+  }
+
+  // Reward proven tutor quality.
+  const rating = Number(tutor?.rating || 0)
+  score += clamp((rating / 5) * 20, 0, 20)
+
+  // Reward experience with diminishing effect.
+  const sessions = Number(tutor?.totalSessions || 0)
+  score += clamp(Math.log10(sessions + 1) * 8, 0, 8)
+
+  // Student interests alignment contributes additional confidence.
+  if (Array.isArray(student?.enrolledSubjects) && subject && student.enrolledSubjects.includes(subject)) {
+    score += 2
+  }
+
+  return Math.round(clamp(score, 0, 100))
+}
+
+function getCommissionRateFromMatchScore(matchScore: number) {
+  // Dynamic platform take: 10% at low confidence down to 5% at high confidence.
+  const rate = 0.10 - (clamp(matchScore, 0, 100) / 100) * 0.05
+  return Number(clamp(rate, 0.05, 0.10).toFixed(4))
+}
+
 // Helper function to get user from access token
 async function getUserFromToken(request: Request) {
   const accessToken = request.headers.get('Authorization')?.split(' ')[1]
@@ -147,6 +181,7 @@ app.put('/make-server-824d015e/profile', async (c) => {
 app.get('/make-server-824d015e/tutors', async (c) => {
   try {
     const { user } = await getUserFromToken(c.req.raw)
+    const studentProfile = user ? await kv.get(`profile:${user.id}`) : null
     
     const subject = c.req.query('subject')
     const minRating = c.req.query('minRating')
@@ -159,7 +194,19 @@ app.get('/make-server-824d015e/tutors', async (c) => {
         if (minRating && t.rating < parseFloat(minRating)) return false
         return true
       })
-      .sort((a: any, b: any) => b.rating - a.rating)
+      .map((tutor: any) => {
+        const matchScore = calculateMatchingScore(studentProfile, tutor, subject || undefined)
+        const suggestedCommissionRate = getCommissionRateFromMatchScore(matchScore)
+        return {
+          ...tutor,
+          matchScore,
+          suggestedCommissionRate,
+        }
+      })
+      .sort((a: any, b: any) => {
+        if (b.matchScore !== a.matchScore) return b.matchScore - a.matchScore
+        return (b.rating || 0) - (a.rating || 0)
+      })
 
     return c.json({ tutors })
   } catch (error) {
@@ -195,6 +242,18 @@ app.post('/make-server-824d015e/applications', async (c) => {
 
     const body = await c.req.json()
     const { tutorId, subject, message, sessionType } = body
+    const studentProfile = await kv.get(`profile:${user.id}`)
+    const tutorProfile = await kv.get(`profile:${tutorId}`)
+    if (!tutorProfile || tutorProfile.role !== 'tutor') {
+      return c.json({ error: 'Tutor not found' }, 404)
+    }
+
+    if (!tutorProfile || tutorProfile.role !== 'tutor') {
+      return c.json({ error: 'Tutor not found' }, 404)
+    }
+
+    const matchScore = calculateMatchingScore(studentProfile, tutorProfile, subject)
+    const commissionRate = getCommissionRateFromMatchScore(matchScore)
 
     const applicationId = `app_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
     const application = {
@@ -205,6 +264,8 @@ app.post('/make-server-824d015e/applications', async (c) => {
       message,
       sessionType, // 'online' or 'in-person'
       status: 'pending', // pending, accepted, declined
+      matchScore,
+      commissionRate,
       createdAt: new Date().toISOString(),
     }
 
@@ -626,6 +687,32 @@ app.post('/make-server-824d015e/payments', async (c) => {
     const body = await c.req.json()
     const { tutorId, sessionId, amount, paymentMethod } = body
 
+    const studentProfile = await kv.get(`profile:${user.id}`)
+    const tutorProfile = await kv.get(`profile:${tutorId}`)
+    const session = sessionId ? await kv.get(`session:${sessionId}`) : null
+    const subject = session?.subject
+
+    let matchScore = calculateMatchingScore(studentProfile, tutorProfile, subject)
+    let commissionRate = getCommissionRateFromMatchScore(matchScore)
+
+    // Prefer accepted application-level score when available.
+    const allApplications = await kv.getByPrefix('application:')
+    const acceptedApplication = allApplications
+      .filter((app: any) => app.studentId === user.id && app.tutorId === tutorId && app.status === 'accepted')
+      .sort((a: any, b: any) => {
+        const aTime = new Date(a.updatedAt || a.createdAt || 0).getTime()
+        const bTime = new Date(b.updatedAt || b.createdAt || 0).getTime()
+        return bTime - aTime
+      })[0]
+
+    if (acceptedApplication?.matchScore) {
+      matchScore = Number(acceptedApplication.matchScore)
+      commissionRate = Number(acceptedApplication.commissionRate || getCommissionRateFromMatchScore(matchScore))
+    }
+
+    const commission = Number((amount * commissionRate).toFixed(2))
+    const tutorNetAmount = Number((amount - commission).toFixed(2))
+
     const paymentId = `payment_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
     const payment = {
       id: paymentId,
@@ -635,15 +722,17 @@ app.post('/make-server-824d015e/payments', async (c) => {
       amount,
       paymentMethod,
       status: 'completed',
-      commission: amount * 0.15, // 15% commission
+      matchScore,
+      commissionRate,
+      commission,
+      tutorNetAmount,
       createdAt: new Date().toISOString(),
     }
 
     await kv.set(`payment:${paymentId}`, payment)
 
     // Update tutor earnings
-    const tutorProfile = await kv.get(`profile:${tutorId}`)
-    tutorProfile.totalEarnings = (tutorProfile.totalEarnings || 0) + (amount * 0.85)
+    tutorProfile.totalEarnings = (tutorProfile.totalEarnings || 0) + tutorNetAmount
     await kv.set(`profile:${tutorId}`, tutorProfile)
 
     return c.json({ payment })
