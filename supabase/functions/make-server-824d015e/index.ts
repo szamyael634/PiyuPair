@@ -16,6 +16,30 @@ const supabase = createClient(
 )
 
 const CREDENTIALS_BUCKET = 'credentials'
+const PROFILE_PICTURES_BUCKET = 'profile-pictures'
+const SUBJECT_KEYWORDS: Record<string, string> = {
+  math: 'Math',
+  mathematics: 'Math',
+  algebra: 'Algebra',
+  geometry: 'Geometry',
+  calculus: 'Calculus',
+  statistics: 'Statistics',
+  physics: 'Physics',
+  chemistry: 'Chemistry',
+  biology: 'Biology',
+  science: 'Science',
+  english: 'English',
+  literature: 'Literature',
+  grammar: 'Grammar',
+  filipino: 'Filipino',
+  araling_panlipunan: 'Araling Panlipunan',
+  'araling panlipunan': 'Araling Panlipunan',
+  history: 'History',
+  economics: 'Economics',
+  ict: 'ICT',
+  computer: 'Computer',
+  programming: 'Programming',
+}
 
 function sanitizeFileName(fileName: string) {
   return String(fileName || 'document')
@@ -50,6 +74,26 @@ async function ensureCredentialsBucket() {
 
   if (createError && !String(createError.message || '').toLowerCase().includes('already')) {
     throw new Error(`Failed to create credentials bucket: ${createError.message}`)
+  }
+}
+
+async function ensureProfilePicturesBucket() {
+  const { data: buckets, error: listError } = await supabase.storage.listBuckets()
+  if (listError) {
+    throw new Error(`Failed to list buckets: ${listError.message}`)
+  }
+
+  const exists = (buckets || []).some((bucket: any) => bucket.name === PROFILE_PICTURES_BUCKET)
+  if (exists) return
+
+  const { error: createError } = await supabase.storage.createBucket(PROFILE_PICTURES_BUCKET, {
+    public: true,
+    fileSizeLimit: 5242880,
+    allowedMimeTypes: ['image/png', 'image/jpeg', 'image/jpg', 'image/webp'],
+  })
+
+  if (createError && !String(createError.message || '').toLowerCase().includes('already')) {
+    throw new Error(`Failed to create profile pictures bucket: ${createError.message}`)
   }
 }
 
@@ -96,6 +140,59 @@ async function uploadCredentialDocuments(userId: string, credentialUploads: any[
   }
 
   return uploadedCredentials
+}
+
+async function uploadProfilePicture(userId: string, profilePictureUpload: any) {
+  if (!profilePictureUpload?.base64Data || !profilePictureUpload?.fileName) {
+    return null
+  }
+
+  await ensureProfilePicturesBucket()
+
+  const safeFileName = sanitizeFileName(profilePictureUpload.fileName)
+  const filePath = `${userId}/profile_${Date.now()}_${safeFileName}`
+  const fileBytes = decodeBase64ToUint8Array(profilePictureUpload.base64Data)
+
+  const { error: uploadError } = await supabase.storage
+    .from(PROFILE_PICTURES_BUCKET)
+    .upload(filePath, fileBytes, {
+      contentType: profilePictureUpload.fileType || 'application/octet-stream',
+      upsert: true,
+    })
+
+  if (uploadError) {
+    throw new Error(`Failed to upload profile picture: ${uploadError.message}`)
+  }
+
+  const { data } = supabase.storage.from(PROFILE_PICTURES_BUCKET).getPublicUrl(filePath)
+  return data.publicUrl
+}
+
+function inferSubjectsFromCorDocuments(credentials: any[] = []) {
+  const subjectSet = new Set<string>()
+  const corDocuments = credentials.filter((doc: any) => doc?.key === 'studentCor')
+
+  for (const document of corDocuments) {
+    const possibleTexts = [
+      document?.fileName,
+      document?.label,
+      document?.extractedText,
+      document?.ocrText,
+      Array.isArray(document?.declaredSubjects) ? document.declaredSubjects.join(', ') : document?.declaredSubjects,
+    ]
+
+    for (const value of possibleTexts) {
+      if (!value) continue
+      const text = String(value).toLowerCase().replace(/[_-]/g, ' ')
+      for (const [keyword, normalized] of Object.entries(SUBJECT_KEYWORDS)) {
+        if (text.includes(keyword.toLowerCase())) {
+          subjectSet.add(normalized)
+        }
+      }
+    }
+  }
+
+  return Array.from(subjectSet).sort((a, b) => a.localeCompare(b))
 }
 
 function clamp(value: number, min: number, max: number) {
@@ -304,6 +401,7 @@ app.post('/make-server-824d015e/signup', async (c) => {
     const userId = data.user.id
     const uploadedCredentials = await uploadCredentialDocuments(userId, credentialUploads)
 
+    const inferredStudentSubjects = role === 'student' ? inferSubjectsFromCorDocuments(uploadedCredentials) : []
     const profile = {
       id: userId,
       email,
@@ -329,7 +427,7 @@ app.post('/make-server-824d015e/signup', async (c) => {
         discountOffered: 0,
       }),
       ...(role === 'student' && {
-        enrolledSubjects: [],
+        enrolledSubjects: inferredStudentSubjects,
         currentGrade: '',
       }),
     }
@@ -393,6 +491,7 @@ app.post('/make-server-824d015e/signup/complete', async (c) => {
       ...(Array.isArray(existingProfile?.credentials) ? existingProfile.credentials : []),
       ...uploadedCredentials,
     ]
+    const inferredStudentSubjects = role === 'student' ? inferSubjectsFromCorDocuments(mergedCredentials) : []
 
     const profile = {
       ...(existingProfile || {}),
@@ -420,7 +519,7 @@ app.post('/make-server-824d015e/signup/complete', async (c) => {
         discountOffered: existingProfile?.discountOffered || 0,
       }),
       ...(role === 'student' && {
-        enrolledSubjects: existingProfile?.enrolledSubjects || [],
+        enrolledSubjects: inferredStudentSubjects.length > 0 ? inferredStudentSubjects : (existingProfile?.enrolledSubjects || []),
         currentGrade: existingProfile?.currentGrade || '',
       }),
     }
@@ -529,6 +628,18 @@ app.get('/make-server-824d015e/profile', async (c) => {
       return c.json({ error: 'Profile not found' }, 404)
     }
 
+    if (profile.role === 'student') {
+      const inferredSubjects = inferSubjectsFromCorDocuments(profile.credentials || [])
+      if (inferredSubjects.length > 0) {
+        const existing = Array.isArray(profile.enrolledSubjects) ? profile.enrolledSubjects : []
+        const same = existing.length === inferredSubjects.length && existing.every((value: string, index: number) => value === inferredSubjects[index])
+        if (!same) {
+          profile.enrolledSubjects = inferredSubjects
+          await kv.set(`profile:${user.id}`, profile)
+        }
+      }
+    }
+
     return c.json({ profile })
   } catch (error) {
     console.log(`Error fetching profile: ${error}`)
@@ -550,7 +661,27 @@ app.put('/make-server-824d015e/profile', async (c) => {
       return c.json({ error: 'Profile not found' }, 404)
     }
 
+    const profilePictureUpload = updates.profilePictureUpload
+    delete updates.profilePictureUpload
+
+    if (existingProfile.role === 'student') {
+      delete updates.currentGrade
+      delete updates.enrolledSubjects
+    }
+
     const updatedProfile = { ...existingProfile, ...updates }
+
+    if (profilePictureUpload?.base64Data) {
+      updatedProfile.profilePictureUrl = await uploadProfilePicture(user.id, profilePictureUpload)
+    }
+
+    if (updatedProfile.role === 'student') {
+      const inferredSubjects = inferSubjectsFromCorDocuments(updatedProfile.credentials || [])
+      if (inferredSubjects.length > 0) {
+        updatedProfile.enrolledSubjects = inferredSubjects
+      }
+    }
+
     await kv.set(`profile:${user.id}`, updatedProfile)
 
     return c.json({ profile: updatedProfile })

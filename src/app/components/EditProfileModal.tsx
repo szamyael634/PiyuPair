@@ -10,7 +10,7 @@ type Profile = {
   role: 'student' | 'tutor' | 'admin';
   phone?: string;
   bio?: string;
-  currentGrade?: string;
+  profilePictureUrl?: string;
   enrolledSubjects?: string[];
   subjects?: string[];
   qualifications?: string[];
@@ -27,12 +27,12 @@ type EditProfileModalProps = {
 
 export default function EditProfileModal({ profile, onClose, onSuccess }: EditProfileModalProps) {
   const [loading, setLoading] = useState(false);
+  const [profilePictureFile, setProfilePictureFile] = useState<File | null>(null);
+  const [profilePicturePreview, setProfilePicturePreview] = useState('');
   const [formData, setFormData] = useState({
     name: '',
     phone: '',
     bio: '',
-    currentGrade: '',
-    enrolledSubjects: '',
     subjects: '',
     qualifications: '',
     hourlyRate: '',
@@ -45,18 +45,35 @@ export default function EditProfileModal({ profile, onClose, onSuccess }: EditPr
       name: profile.name || '',
       phone: profile.phone || '',
       bio: profile.bio || '',
-      currentGrade: profile.currentGrade || '',
-      enrolledSubjects: (profile.enrolledSubjects || []).join(', '),
       subjects: (profile.subjects || []).join(', '),
       qualifications: (profile.qualifications || []).join(', '),
       hourlyRate: profile.hourlyRate?.toString() || '',
       experience: profile.experience || '',
       discountOffered: profile.discountOffered?.toString() || '',
     });
+    setProfilePicturePreview(profile.profilePictureUrl || '');
+    setProfilePictureFile(null);
   }, [profile]);
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
     setFormData((current) => ({ ...current, [e.target.name]: e.target.value }));
+  };
+
+  const handleProfilePictureChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0] || null;
+    if (!file) {
+      setProfilePictureFile(null);
+      setProfilePicturePreview(profile.profilePictureUrl || '');
+      return;
+    }
+
+    if (file.size > 5 * 1024 * 1024) {
+      toast.error('Profile picture must be 5MB or smaller.');
+      return;
+    }
+
+    setProfilePictureFile(file);
+    setProfilePicturePreview(URL.createObjectURL(file));
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -70,9 +87,8 @@ export default function EditProfileModal({ profile, onClose, onSuccess }: EditPr
         bio: formData.bio.trim(),
       };
 
-      if (profile.role === 'student') {
-        updates.currentGrade = formData.currentGrade.trim();
-        updates.enrolledSubjects = splitCsv(formData.enrolledSubjects);
+      if (profilePictureFile) {
+        updates.profilePictureUpload = await fileToUploadPayload(profilePictureFile);
       }
 
       if (profile.role === 'tutor') {
@@ -104,6 +120,25 @@ export default function EditProfileModal({ profile, onClose, onSuccess }: EditPr
       <div className="w-full max-w-2xl rounded-xl bg-white shadow-xl max-h-[90vh] overflow-y-auto">
         <div className="flex items-center justify-between border-b border-gray-200 px-6 py-4">
           <div>
+
+          <div>
+            <label className="mb-2 block text-sm font-medium text-gray-700">Profile Picture</label>
+            <div className="flex items-center gap-3">
+              <div className="size-14 overflow-hidden rounded-full bg-gray-100">
+                {profilePicturePreview ? (
+                  <img src={profilePicturePreview} alt="Profile preview" className="h-full w-full object-cover" />
+                ) : (
+                  <div className="flex h-full w-full items-center justify-center text-xs text-gray-400">No image</div>
+                )}
+              </div>
+              <input
+                type="file"
+                accept="image/png,image/jpeg,image/jpg,image/webp"
+                onChange={handleProfilePictureChange}
+                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-transparent focus:ring-2 focus:ring-blue-500"
+              />
+            </div>
+          </div>
             <h2 className="text-2xl font-bold text-gray-800">Edit Profile</h2>
             <p className="text-sm text-gray-500">Update your public and contact information</p>
           </div>
@@ -153,23 +188,20 @@ export default function EditProfileModal({ profile, onClose, onSuccess }: EditPr
           {profile.role === 'student' && (
             <>
               <div>
-                <label className="mb-2 block text-sm font-medium text-gray-700">Current Grade</label>
-                <input
-                  name="currentGrade"
-                  value={formData.currentGrade}
-                  onChange={handleChange}
-                  className="w-full rounded-lg border border-gray-300 px-4 py-3 focus:border-transparent focus:ring-2 focus:ring-blue-500"
-                />
-              </div>
-              <div>
-                <label className="mb-2 block text-sm font-medium text-gray-700">Enrolled Subjects</label>
-                <input
-                  name="enrolledSubjects"
-                  value={formData.enrolledSubjects}
-                  onChange={handleChange}
-                  placeholder="Math, Physics, English"
-                  className="w-full rounded-lg border border-gray-300 px-4 py-3 focus:border-transparent focus:ring-2 focus:ring-blue-500"
-                />
+                <label className="mb-2 block text-sm font-medium text-gray-700">Enrolled Subjects (from submitted COR)</label>
+                {(profile.enrolledSubjects || []).length > 0 ? (
+                  <div className="flex flex-wrap gap-2 rounded-lg border border-gray-200 bg-gray-50 px-4 py-3">
+                    {(profile.enrolledSubjects || []).map((subject) => (
+                      <span key={subject} className="rounded-full bg-blue-100 px-3 py-1 text-sm text-blue-700">
+                        {subject}
+                      </span>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+                    No enrolled subjects detected yet. Upload a COR with subject details to auto-populate this list.
+                  </p>
+                )}
               </div>
             </>
           )}
@@ -255,6 +287,22 @@ export default function EditProfileModal({ profile, onClose, onSuccess }: EditPr
       </div>
     </div>
   );
+}
+
+async function fileToUploadPayload(file: File) {
+  const base64Data = await new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || ''));
+    reader.onerror = () => reject(new Error('Failed to read profile picture file'));
+    reader.readAsDataURL(file);
+  });
+
+  return {
+    fileName: file.name,
+    fileType: file.type,
+    fileSize: file.size,
+    base64Data,
+  };
 }
 
 function splitCsv(value: string) {

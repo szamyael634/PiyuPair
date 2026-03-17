@@ -140,6 +140,15 @@ export default function TutorDashboard() {
                 <MessageCircle className="size-6 text-gray-600" />
               </button>
               <div className="flex items-center gap-3">
+                <div className="size-10 overflow-hidden rounded-full bg-gray-100">
+                  {profile?.profilePictureUrl ? (
+                    <img src={profile.profilePictureUrl} alt="Profile" className="h-full w-full object-cover" />
+                  ) : (
+                    <div className="flex h-full w-full items-center justify-center text-sm font-semibold text-gray-500">
+                      {profile?.name?.[0] || 'T'}
+                    </div>
+                  )}
+                </div>
                 <div className="text-right">
                   <p className="font-semibold text-gray-800">{profile?.name}</p>
                   <p className="text-sm text-gray-500">Tutor</p>
