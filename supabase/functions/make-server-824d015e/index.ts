@@ -49,6 +49,127 @@ function getCommissionRateFromMatchScore(matchScore: number) {
   return Number(clamp(rate, 0.05, 0.10).toFixed(4))
 }
 
+function estimateAIDetection(text: string, fileUrl?: string) {
+  const safeText = (text || '').trim()
+  const lower = safeText.toLowerCase()
+  const repeatedPhraseCount = (safeText.match(/\b(therefore|moreover|furthermore|in conclusion)\b/gi) || []).length
+  const sentenceCount = Math.max(1, safeText.split(/[.!?]+/).filter(Boolean).length)
+  const avgSentenceLength = safeText.length / sentenceCount
+  const hasUrlOnlySubmission = !safeText && !!fileUrl
+
+  let score = 0
+  if (avgSentenceLength > 140) score += 20
+  if (repeatedPhraseCount >= 3) score += 15
+  if (safeText.length > 1200 && !lower.includes('i ') && !lower.includes('my ')) score += 20
+  if (hasUrlOnlySubmission) score += 10
+
+  const flags = []
+  if (avgSentenceLength > 140) flags.push('very-long-sentences')
+  if (repeatedPhraseCount >= 3) flags.push('template-like-connectors')
+  if (safeText.length > 1200 && !lower.includes('i ') && !lower.includes('my ')) flags.push('low-personal-context')
+  if (hasUrlOnlySubmission) flags.push('file-only-submission')
+
+  return {
+    riskScore: clamp(Math.round(score), 0, 100),
+    confidence: score >= 40 ? 'medium' : 'low',
+    flags,
+    checkedAt: new Date().toISOString(),
+  }
+}
+
+function evaluateCredentialConsistency(input: {
+  subject?: string
+  certificateType?: string
+  grade?: string | number
+  declaredName?: string
+  extractedText?: string
+}) {
+  const extracted = (input.extractedText || '').toLowerCase()
+  let matchedChecks = 0
+  let totalChecks = 0
+  const mismatches: string[] = []
+
+  if (input.subject) {
+    totalChecks += 1
+    if (extracted.includes(String(input.subject).toLowerCase())) {
+      matchedChecks += 1
+    } else {
+      mismatches.push('subject-not-found-in-document-text')
+    }
+  }
+
+  if (input.certificateType) {
+    totalChecks += 1
+    if (extracted.includes(String(input.certificateType).toLowerCase())) {
+      matchedChecks += 1
+    } else {
+      mismatches.push('certificate-type-not-found-in-document-text')
+    }
+  }
+
+  if (input.grade !== undefined && input.grade !== null && String(input.grade).length > 0) {
+    totalChecks += 1
+    if (extracted.includes(String(input.grade).toLowerCase())) {
+      matchedChecks += 1
+    } else {
+      mismatches.push('grade-not-found-in-document-text')
+    }
+  }
+
+  if (input.declaredName) {
+    totalChecks += 1
+    if (extracted.includes(String(input.declaredName).toLowerCase())) {
+      matchedChecks += 1
+    } else {
+      mismatches.push('declared-name-not-found-in-document-text')
+    }
+  }
+
+  const consistencyScore = totalChecks > 0 ? Math.round((matchedChecks / totalChecks) * 100) : 0
+  return {
+    consistencyScore,
+    matchedChecks,
+    totalChecks,
+    mismatches,
+    status: consistencyScore >= 70 ? 'likely_match' : 'needs_review',
+    checkedAt: new Date().toISOString(),
+  }
+}
+
+function getLevelFromXp(xp: number) {
+  if (xp >= 3000) return 6
+  if (xp >= 2000) return 5
+  if (xp >= 1200) return 4
+  if (xp >= 700) return 3
+  if (xp >= 300) return 2
+  return 1
+}
+
+function getLocalizedMessages(lang: string) {
+  const dictionary: Record<string, Record<string, string>> = {
+    en: {
+      welcome: 'Welcome to PiyuPair',
+      sessionFound: 'Session found',
+      sessionNotFound: 'Session not found',
+      submissionReceived: 'Submission received',
+    },
+    fil: {
+      welcome: 'Maligayang pagdating sa PiyuPair',
+      sessionFound: 'Nahanap ang session',
+      sessionNotFound: 'Hindi nahanap ang session',
+      submissionReceived: 'Natanggap ang sagot',
+    },
+    es: {
+      welcome: 'Bienvenido a PiyuPair',
+      sessionFound: 'Sesion encontrada',
+      sessionNotFound: 'Sesion no encontrada',
+      submissionReceived: 'Entrega recibida',
+    },
+  }
+
+  return dictionary[lang] || dictionary.en
+}
+
 // Helper function to get user from access token
 async function getUserFromToken(request: Request) {
   const accessToken = request.headers.get('Authorization')?.split(' ')[1]
@@ -238,6 +359,33 @@ app.put('/make-server-824d015e/profile', async (c) => {
   } catch (error) {
     console.log(`Error updating profile: ${error}`)
     return c.json({ error: 'Failed to update profile' }, 500)
+  }
+})
+
+app.put('/make-server-824d015e/profile/language', async (c) => {
+  try {
+    const { user } = await getUserFromToken(c.req.raw)
+    if (!user) {
+      return c.json({ error: 'Unauthorized' }, 401)
+    }
+
+    const { language } = await c.req.json()
+    if (!language) {
+      return c.json({ error: 'Language is required' }, 400)
+    }
+
+    const profile = await kv.get(`profile:${user.id}`)
+    if (!profile) {
+      return c.json({ error: 'Profile not found' }, 404)
+    }
+
+    profile.preferredLanguage = String(language).toLowerCase()
+    await kv.set(`profile:${user.id}`, profile)
+
+    return c.json({ profile })
+  } catch (error) {
+    console.log(`Error updating language: ${error}`)
+    return c.json({ error: 'Failed to update language' }, 500)
   }
 })
 
@@ -566,6 +714,7 @@ app.post('/make-server-824d015e/activities/:id/submit', async (c) => {
       studentId: user.id,
       fileUrl,
       notes,
+      aiDetection: estimateAIDetection(notes || '', fileUrl),
       submittedAt: new Date().toISOString(),
       grade: null,
       feedback: null,
@@ -591,7 +740,15 @@ app.post('/make-server-824d015e/upload-certificate', async (c) => {
     }
 
     const body = await c.req.json()
-    const { subject, certificateData, certificateType } = body
+    const { subject, certificateData, certificateType, extractedText, declaredName } = body
+
+    const profile = await kv.get(`profile:${user.id}`)
+    const credentialCheck = evaluateCredentialConsistency({
+      subject,
+      certificateType,
+      extractedText,
+      declaredName: declaredName || profile?.name,
+    })
 
     const certId = `cert_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
     const certificate = {
@@ -601,16 +758,17 @@ app.post('/make-server-824d015e/upload-certificate', async (c) => {
       certificateData, // Base64 or file URL
       certificateType, // 'enrollment', 'completion', 'training'
       uploadedAt: new Date().toISOString(),
-      verified: false,
+      verified: credentialCheck.status === 'likely_match',
+      credentialCheck,
     }
 
     await kv.set(`certificate:${certId}`, certificate)
 
     // Update user profile
-    const profile = await kv.get(`profile:${user.id}`)
-    if (!profile.certificates) profile.certificates = []
-    profile.certificates.push(certId)
-    await kv.set(`profile:${user.id}`, profile)
+    const refreshedProfile = await kv.get(`profile:${user.id}`)
+    if (!refreshedProfile.certificates) refreshedProfile.certificates = []
+    refreshedProfile.certificates.push(certId)
+    await kv.set(`profile:${user.id}`, refreshedProfile)
 
     return c.json({ certificate })
   } catch (error) {
@@ -627,7 +785,15 @@ app.post('/make-server-824d015e/upload-grade', async (c) => {
     }
 
     const body = await c.req.json()
-    const { subject, grade, gradeData } = body
+    const { subject, grade, gradeData, extractedText, declaredName } = body
+
+    const profile = await kv.get(`profile:${user.id}`)
+    const credentialCheck = evaluateCredentialConsistency({
+      subject,
+      grade,
+      extractedText,
+      declaredName: declaredName || profile?.name,
+    })
 
     const gradeId = `grade_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
     const gradeRecord = {
@@ -636,16 +802,17 @@ app.post('/make-server-824d015e/upload-grade', async (c) => {
       subject,
       grade,
       gradeData, // Base64 or file URL
+      credentialCheck,
       uploadedAt: new Date().toISOString(),
     }
 
     await kv.set(`grade:${gradeId}`, gradeRecord)
 
     // Update user profile
-    const profile = await kv.get(`profile:${user.id}`)
-    if (!profile.grades) profile.grades = []
-    profile.grades.push(gradeId)
-    await kv.set(`profile:${user.id}`, profile)
+    const refreshedProfile = await kv.get(`profile:${user.id}`)
+    if (!refreshedProfile.grades) refreshedProfile.grades = []
+    refreshedProfile.grades.push(gradeId)
+    await kv.set(`profile:${user.id}`, refreshedProfile)
 
     // Suggest tutors based on low grade
     if (parseFloat(grade) < 75) {
@@ -859,6 +1026,345 @@ app.post('/make-server-824d015e/ratings', async (c) => {
   } catch (error) {
     console.log(`Error submitting rating: ${error}`)
     return c.json({ error: 'Failed to submit rating' }, 500)
+  }
+})
+
+// ============= LEARNING PATH ROUTES =============
+
+app.post('/make-server-824d015e/learning-paths', async (c) => {
+  try {
+    const { user } = await getUserFromToken(c.req.raw)
+    if (!user) return c.json({ error: 'Unauthorized' }, 401)
+
+    const body = await c.req.json()
+    const { title, objective, moduleTitles = [] } = body
+
+    const pathId = `path_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
+    const modules = moduleTitles.map((name: string, index: number) => ({
+      id: `module_${index + 1}`,
+      title: name,
+      completed: false,
+      score: null,
+      completedAt: null,
+    }))
+
+    const path = {
+      id: pathId,
+      studentId: user.id,
+      title,
+      objective,
+      modules,
+      progressPercent: 0,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    }
+
+    await kv.set(`learning_path:${pathId}`, path)
+    return c.json({ learningPath: path })
+  } catch (error) {
+    console.log(`Error creating learning path: ${error}`)
+    return c.json({ error: 'Failed to create learning path' }, 500)
+  }
+})
+
+app.get('/make-server-824d015e/learning-paths', async (c) => {
+  try {
+    const { user } = await getUserFromToken(c.req.raw)
+    if (!user) return c.json({ error: 'Unauthorized' }, 401)
+
+    const allPaths = await kv.getByPrefix('learning_path:')
+    const learningPaths = allPaths.filter((p: any) => p.studentId === user.id)
+    return c.json({ learningPaths })
+  } catch (error) {
+    console.log(`Error fetching learning paths: ${error}`)
+    return c.json({ error: 'Failed to fetch learning paths' }, 500)
+  }
+})
+
+app.put('/make-server-824d015e/learning-paths/:id/progress', async (c) => {
+  try {
+    const { user } = await getUserFromToken(c.req.raw)
+    if (!user) return c.json({ error: 'Unauthorized' }, 401)
+
+    const pathId = c.req.param('id')
+    const { moduleId, completed, score } = await c.req.json()
+    const path = await kv.get(`learning_path:${pathId}`)
+
+    if (!path || path.studentId !== user.id) {
+      return c.json({ error: 'Learning path not found' }, 404)
+    }
+
+    path.modules = (path.modules || []).map((m: any) =>
+      m.id === moduleId
+        ? {
+            ...m,
+            completed: !!completed,
+            score: score ?? m.score,
+            completedAt: completed ? new Date().toISOString() : null,
+          }
+        : m,
+    )
+
+    const completedCount = path.modules.filter((m: any) => m.completed).length
+    path.progressPercent = path.modules.length > 0 ? Math.round((completedCount / path.modules.length) * 100) : 0
+    path.updatedAt = new Date().toISOString()
+
+    await kv.set(`learning_path:${pathId}`, path)
+
+    const gamificationKey = `gamification:${user.id}`
+    const game = (await kv.get(gamificationKey)) || { xp: 0, badges: [], level: 1, updatedAt: null }
+    if (completed) {
+      game.xp += 50
+      game.level = getLevelFromXp(game.xp)
+      if (path.progressPercent === 100 && !game.badges.includes('Path Finisher')) {
+        game.badges.push('Path Finisher')
+      }
+      game.updatedAt = new Date().toISOString()
+      await kv.set(gamificationKey, game)
+    }
+
+    return c.json({ learningPath: path, gamification: game })
+  } catch (error) {
+    console.log(`Error updating learning path progress: ${error}`)
+    return c.json({ error: 'Failed to update progress' }, 500)
+  }
+})
+
+app.get('/make-server-824d015e/learning-paths/:id/analytics', async (c) => {
+  try {
+    const { user } = await getUserFromToken(c.req.raw)
+    if (!user) return c.json({ error: 'Unauthorized' }, 401)
+
+    const pathId = c.req.param('id')
+    const path = await kv.get(`learning_path:${pathId}`)
+    if (!path || path.studentId !== user.id) {
+      return c.json({ error: 'Learning path not found' }, 404)
+    }
+
+    const modules = path.modules || []
+    const completedModules = modules.filter((m: any) => m.completed)
+    const averageScore = completedModules.length > 0
+      ? completedModules.reduce((sum: number, m: any) => sum + Number(m.score || 0), 0) / completedModules.length
+      : 0
+
+    return c.json({
+      analytics: {
+        pathId,
+        title: path.title,
+        progressPercent: path.progressPercent || 0,
+        modulesTotal: modules.length,
+        modulesCompleted: completedModules.length,
+        averageScore: Number(averageScore.toFixed(2)),
+        lastUpdatedAt: path.updatedAt,
+      },
+    })
+  } catch (error) {
+    console.log(`Error fetching learning path analytics: ${error}`)
+    return c.json({ error: 'Failed to fetch analytics' }, 500)
+  }
+})
+
+// ============= INTERACTIVE ASSESSMENT ROUTES =============
+
+app.post('/make-server-824d015e/assessments', async (c) => {
+  try {
+    const { user } = await getUserFromToken(c.req.raw)
+    if (!user) return c.json({ error: 'Unauthorized' }, 401)
+
+    const body = await c.req.json()
+    const { sessionId, title, questions = [] } = body
+
+    const assessmentId = `assessment_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
+    const assessment = {
+      id: assessmentId,
+      sessionId,
+      title,
+      createdBy: user.id,
+      questions,
+      createdAt: new Date().toISOString(),
+    }
+
+    await kv.set(`assessment:${assessmentId}`, assessment)
+    return c.json({ assessment })
+  } catch (error) {
+    console.log(`Error creating assessment: ${error}`)
+    return c.json({ error: 'Failed to create assessment' }, 500)
+  }
+})
+
+app.get('/make-server-824d015e/assessments/:sessionId', async (c) => {
+  try {
+    const { user } = await getUserFromToken(c.req.raw)
+    if (!user) return c.json({ error: 'Unauthorized' }, 401)
+
+    const sessionId = c.req.param('sessionId')
+    const assessments = (await kv.getByPrefix('assessment:')).filter((a: any) => a.sessionId === sessionId)
+    return c.json({ assessments })
+  } catch (error) {
+    console.log(`Error fetching assessments: ${error}`)
+    return c.json({ error: 'Failed to fetch assessments' }, 500)
+  }
+})
+
+app.post('/make-server-824d015e/assessments/:id/submit', async (c) => {
+  try {
+    const { user } = await getUserFromToken(c.req.raw)
+    if (!user) return c.json({ error: 'Unauthorized' }, 401)
+
+    const assessmentId = c.req.param('id')
+    const { answers = [] } = await c.req.json()
+    const assessment = await kv.get(`assessment:${assessmentId}`)
+
+    if (!assessment) {
+      return c.json({ error: 'Assessment not found' }, 404)
+    }
+
+    const questions = assessment.questions || []
+    let correct = 0
+    for (const q of questions) {
+      const selected = answers.find((a: any) => a.questionId === q.id)?.answer
+      if (selected !== undefined && selected === q.correctAnswer) {
+        correct += 1
+      }
+    }
+
+    const scorePercent = questions.length > 0 ? Math.round((correct / questions.length) * 100) : 0
+    const submissionId = `assessment_submission_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
+    const submission = {
+      id: submissionId,
+      assessmentId,
+      studentId: user.id,
+      answers,
+      scorePercent,
+      submittedAt: new Date().toISOString(),
+    }
+
+    await kv.set(`assessment_submission:${submissionId}`, submission)
+
+    const gamificationKey = `gamification:${user.id}`
+    const game = (await kv.get(gamificationKey)) || { xp: 0, badges: [], level: 1, updatedAt: null }
+    game.xp += scorePercent >= 80 ? 80 : 40
+    game.level = getLevelFromXp(game.xp)
+    if (scorePercent >= 90 && !game.badges.includes('Assessment Ace')) {
+      game.badges.push('Assessment Ace')
+    }
+    game.updatedAt = new Date().toISOString()
+    await kv.set(gamificationKey, game)
+
+    return c.json({ submission, gamification: game })
+  } catch (error) {
+    console.log(`Error submitting assessment: ${error}`)
+    return c.json({ error: 'Failed to submit assessment' }, 500)
+  }
+})
+
+// ============= GAMIFICATION ROUTES =============
+
+app.get('/make-server-824d015e/gamification/profile', async (c) => {
+  try {
+    const { user } = await getUserFromToken(c.req.raw)
+    if (!user) return c.json({ error: 'Unauthorized' }, 401)
+
+    const game = (await kv.get(`gamification:${user.id}`)) || {
+      xp: 0,
+      level: 1,
+      badges: [],
+      updatedAt: null,
+    }
+    return c.json({ gamification: game })
+  } catch (error) {
+    console.log(`Error fetching gamification profile: ${error}`)
+    return c.json({ error: 'Failed to fetch gamification profile' }, 500)
+  }
+})
+
+// ============= REAL-TIME SCHEDULING ROUTES =============
+
+app.post('/make-server-824d015e/scheduling/availability', async (c) => {
+  try {
+    const { user } = await getUserFromToken(c.req.raw)
+    if (!user) return c.json({ error: 'Unauthorized' }, 401)
+
+    const { slots = [] } = await c.req.json()
+    const availability = {
+      tutorId: user.id,
+      slots,
+      updatedAt: new Date().toISOString(),
+    }
+
+    await kv.set(`availability:${user.id}`, availability)
+    return c.json({ availability })
+  } catch (error) {
+    console.log(`Error updating availability: ${error}`)
+    return c.json({ error: 'Failed to update availability' }, 500)
+  }
+})
+
+app.get('/make-server-824d015e/scheduling/availability/:tutorId', async (c) => {
+  try {
+    const tutorId = c.req.param('tutorId')
+    const availability = await kv.get(`availability:${tutorId}`)
+    return c.json({ availability: availability || { tutorId, slots: [] } })
+  } catch (error) {
+    console.log(`Error fetching availability: ${error}`)
+    return c.json({ error: 'Failed to fetch availability' }, 500)
+  }
+})
+
+app.post('/make-server-824d015e/scheduling/bookings', async (c) => {
+  try {
+    const { user } = await getUserFromToken(c.req.raw)
+    if (!user) return c.json({ error: 'Unauthorized' }, 401)
+
+    const { tutorId, slot, subject } = await c.req.json()
+    const bookingId = `booking_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
+    const booking = {
+      id: bookingId,
+      studentId: user.id,
+      tutorId,
+      slot,
+      subject,
+      status: 'requested',
+      createdAt: new Date().toISOString(),
+    }
+
+    await kv.set(`booking:${bookingId}`, booking)
+    return c.json({ booking })
+  } catch (error) {
+    console.log(`Error creating booking: ${error}`)
+    return c.json({ error: 'Failed to create booking' }, 500)
+  }
+})
+
+app.get('/make-server-824d015e/scheduling/bookings', async (c) => {
+  try {
+    const { user } = await getUserFromToken(c.req.raw)
+    if (!user) return c.json({ error: 'Unauthorized' }, 401)
+
+    const profile = await kv.get(`profile:${user.id}`)
+    const allBookings = await kv.getByPrefix('booking:')
+    const bookings = allBookings.filter((b: any) => {
+      if (profile?.role === 'tutor') return b.tutorId === user.id
+      if (profile?.role === 'admin') return true
+      return b.studentId === user.id
+    })
+
+    return c.json({ bookings })
+  } catch (error) {
+    console.log(`Error fetching bookings: ${error}`)
+    return c.json({ error: 'Failed to fetch bookings' }, 500)
+  }
+})
+
+// ============= MULTI-LANGUAGE ROUTES =============
+
+app.get('/make-server-824d015e/i18n/messages', async (c) => {
+  try {
+    const lang = String(c.req.query('lang') || 'en').toLowerCase()
+    return c.json({ lang, messages: getLocalizedMessages(lang) })
+  } catch (error) {
+    console.log(`Error fetching localized messages: ${error}`)
+    return c.json({ error: 'Failed to fetch localized messages' }, 500)
   }
 })
 
