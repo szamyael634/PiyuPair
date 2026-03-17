@@ -388,11 +388,24 @@ app.get('/make-server-824d015e/sessions/:id', async (c) => {
       return c.json({ error: 'Unauthorized' }, 401)
     }
 
+    const profile = await kv.get(`profile:${user.id}`)
+    if (!profile) {
+      return c.json({ error: 'Profile not found' }, 404)
+    }
+
     const sessionId = c.req.param('id')
     const session = await kv.get(`session:${sessionId}`)
 
     if (!session) {
       return c.json({ error: 'Session not found' }, 404)
+    }
+
+    if (profile.role === 'student' && session.studentId !== user.id) {
+      return c.json({ error: 'Forbidden - You can only access your own sessions' }, 403)
+    }
+
+    if (profile.role === 'tutor' && session.tutorId !== user.id) {
+      return c.json({ error: 'Forbidden - You can only access your own sessions' }, 403)
     }
 
     return c.json({ session })

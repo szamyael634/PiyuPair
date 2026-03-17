@@ -14,6 +14,8 @@ export default function StudentDashboard() {
   const [showUploadCert, setShowUploadCert] = useState(false);
   const [showUploadGrade, setShowUploadGrade] = useState(false);
   const [showEditProfile, setShowEditProfile] = useState(false);
+  const [sessionLookupId, setSessionLookupId] = useState('');
+  const [findingSession, setFindingSession] = useState(false);
 
   useEffect(() => {
     loadData();
@@ -47,6 +49,25 @@ export default function StudentDashboard() {
   const handleLogout = async () => {
     await supabase.auth.signOut();
     navigate('/');
+  };
+
+  const handleFindSessionById = async () => {
+    const sessionId = sessionLookupId.trim();
+    if (!sessionId) {
+      toast.error('Please enter a class/session ID');
+      return;
+    }
+
+    setFindingSession(true);
+    try {
+      await apiCall(`/sessions/${sessionId}`);
+      navigate(`/classroom/${sessionId}`);
+    } catch (error: any) {
+      console.error('Session lookup error:', error);
+      toast.error(error.message || 'Class/session not found');
+    } finally {
+      setFindingSession(false);
+    }
   };
 
   if (loading) {
@@ -141,6 +162,29 @@ export default function StudentDashboard() {
             onClick={() => navigate('/messages')}
             color="orange"
           />
+        </div>
+
+        <div className="bg-white rounded-xl shadow-md p-6 mb-8">
+          <h2 className="text-xl font-bold text-gray-800 mb-3">Find Class by Session ID</h2>
+          <p className="text-sm text-gray-600 mb-4">
+            Enter your class/session ID to open the classroom directly.
+          </p>
+          <div className="flex flex-col md:flex-row gap-3">
+            <input
+              type="text"
+              value={sessionLookupId}
+              onChange={(e) => setSessionLookupId(e.target.value)}
+              placeholder="e.g. session_1710651234567_abcd12345"
+              className="flex-1 rounded-lg border border-gray-300 px-4 py-3 focus:ring-2 focus:ring-blue-500"
+            />
+            <button
+              onClick={handleFindSessionById}
+              disabled={findingSession}
+              className="px-5 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition disabled:opacity-50"
+            >
+              {findingSession ? 'Finding...' : 'Open Class'}
+            </button>
+          </div>
         </div>
 
         {/* Stats */}
