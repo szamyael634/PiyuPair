@@ -65,8 +65,8 @@ export default function AdminDashboard() {
 
   const viewCredentials = async (userId: string) => {
     try {
-      const { profile: userProfile, certificates } = await apiCall(`/admin/credentials/${userId}`);
-      setSelectedUser({ profile: userProfile, certificates });
+      const { profile: userProfile, certificates, credentials } = await apiCall(`/admin/credentials/${userId}`);
+      setSelectedUser({ profile: userProfile, certificates, credentials });
     } catch (error) {
       console.error('Error fetching credentials:', error);
       toast.error('Failed to fetch credentials');
@@ -339,6 +339,9 @@ function ApprovalCard({ approval, onApprove, onReject, onViewCredentials }: any)
 }
 
 function CredentialsModal({ user, onClose }: any) {
+  const modernCredentials = Array.isArray(user.credentials) ? user.credentials : [];
+  const legacyCertificates = Array.isArray(user.certificates) ? user.certificates : [];
+
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-6 z-50">
       <div className="bg-white rounded-xl p-8 w-full max-w-2xl max-h-[90vh] overflow-y-auto">
@@ -360,11 +363,38 @@ function CredentialsModal({ user, onClose }: any) {
           </div>
         </div>
 
-        {user.certificates?.length > 0 && (
+        {modernCredentials.length > 0 && (
           <div className="mb-6">
-            <h3 className="font-bold text-lg mb-2">Certificates</h3>
+            <h3 className="font-bold text-lg mb-2">Uploaded Signup Credentials</h3>
             <div className="space-y-3">
-              {user.certificates.map((cert: any) => (
+              {modernCredentials.map((doc: any, index: number) => (
+                <div key={`${doc.path || doc.fileName || 'doc'}-${index}`} className="border rounded-lg p-3">
+                  <p className="text-sm"><strong>Document:</strong> {doc.label || doc.key || 'Credential'}</p>
+                  <p className="text-sm"><strong>File:</strong> {doc.fileName || 'N/A'}</p>
+                  <p className="text-sm"><strong>Type:</strong> {doc.fileType || 'Unknown'}</p>
+                  <p className="text-sm"><strong>Required:</strong> {doc.required ? 'Yes' : 'No'}</p>
+                  <p className="text-sm text-gray-500">Uploaded: {doc.uploadedAt ? new Date(doc.uploadedAt).toLocaleDateString() : 'N/A'}</p>
+                  {doc.url && (
+                    <a
+                      href={doc.url}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="inline-block mt-2 text-sm text-blue-600 hover:underline"
+                    >
+                      Open Document
+                    </a>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {legacyCertificates.length > 0 && (
+          <div className="mb-6">
+            <h3 className="font-bold text-lg mb-2">Legacy Certificates</h3>
+            <div className="space-y-3">
+              {legacyCertificates.map((cert: any) => (
                 <div key={cert.id} className="border rounded-lg p-3">
                   <p className="text-sm"><strong>Subject:</strong> {cert.subject}</p>
                   <p className="text-sm"><strong>Type:</strong> {cert.certificateType}</p>
@@ -372,6 +402,12 @@ function CredentialsModal({ user, onClose }: any) {
                 </div>
               ))}
             </div>
+          </div>
+        )}
+
+        {modernCredentials.length === 0 && legacyCertificates.length === 0 && (
+          <div className="mb-6 rounded-lg border border-gray-200 p-4 text-sm text-gray-600">
+            No credentials found for this user.
           </div>
         )}
 

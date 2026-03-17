@@ -15,6 +15,44 @@ const supabase = createClient(
   Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '',
 )
 
+const CREDENTIALS_BUCKET = 'credentials'
+
+function sanitizeFileName(fileName: string) {
+  return String(fileName || 'document')
+    .replace(/[^a-zA-Z0-9._-]/g, '_')
+    .replace(/_+/g, '_')
+}
+
+function decodeBase64ToUint8Array(base64Data: string) {
+  const cleanBase64 = base64Data.includes(',') ? base64Data.split(',')[1] : base64Data
+  const binary = atob(cleanBase64)
+  const bytes = new Uint8Array(binary.length)
+  for (let i = 0; i < binary.length; i += 1) {
+    bytes[i] = binary.charCodeAt(i)
+  }
+  return bytes
+}
+
+async function ensureCredentialsBucket() {
+  const { data: buckets, error: listError } = await supabase.storage.listBuckets()
+  if (listError) {
+    throw new Error(`Failed to list buckets: ${listError.message}`)
+  }
+
+  const exists = (buckets || []).some((bucket: any) => bucket.name === CREDENTIALS_BUCKET)
+  if (exists) return
+
+  const { error: createError } = await supabase.storage.createBucket(CREDENTIALS_BUCKET, {
+    public: true,
+    fileSizeLimit: 10485760,
+    allowedMimeTypes: ['application/pdf', 'image/png', 'image/jpeg', 'image/jpg'],
+  })
+
+  if (createError && !String(createError.message || '').toLowerCase().includes('already')) {
+    throw new Error(`Failed to create credentials bucket: ${createError.message}`)
+  }
+}
+
 function clamp(value: number, min: number, max: number) {
   return Math.max(min, Math.min(max, value))
 }
@@ -185,7 +223,23 @@ async function getUserFromToken(request: Request) {
 app.post('/make-server-824d015e/signup', async (c) => {
   try {
     const body = await c.req.json()
-    const { email, password, name, role, phone, subjects, bio, hourlyRate, qualifications, experience } = body
+    const {
+      email,
+      password,
+      name,
+      role,
+      phone,
+      subjects,
+      bio,
+      hourlyRate,
+      qualifications,
+      experience,
+      firstName,
+      middleName,
+      lastName,
+      suffix,
+      credentialUploads,
+    } = body
 
     // Create user with Supabase Auth
     const { data, error } = await supabase.auth.admin.createUser({
@@ -203,13 +257,58 @@ app.post('/make-server-824d015e/signup', async (c) => {
 
     // Store additional user profile data in KV store
     const userId = data.user.id
+    const uploadedCredentials = []
+
+    if (Array.isArray(credentialUploads) && credentialUploads.length > 0) {
+      await ensureCredentialsBucket()
+
+      for (const document of credentialUploads) {
+        if (!document?.base64Data || !document?.fileName) continue
+
+        const safeFileName = sanitizeFileName(document.fileName)
+        const filePath = `${userId}/${Date.now()}_${document.key || 'credential'}_${safeFileName}`
+        const fileBytes = decodeBase64ToUint8Array(document.base64Data)
+
+        const { error: uploadError } = await supabase.storage
+          .from(CREDENTIALS_BUCKET)
+          .upload(filePath, fileBytes, {
+            contentType: document.fileType || 'application/octet-stream',
+            upsert: false,
+          })
+
+        if (uploadError) {
+          console.log(`Error uploading credential ${safeFileName}: ${uploadError.message}`)
+          continue
+        }
+
+        const { data: publicUrlData } = supabase.storage.from(CREDENTIALS_BUCKET).getPublicUrl(filePath)
+        uploadedCredentials.push({
+          key: document.key,
+          label: document.label,
+          required: Boolean(document.required),
+          fileName: document.fileName,
+          fileType: document.fileType,
+          fileSize: document.fileSize,
+          bucket: CREDENTIALS_BUCKET,
+          path: filePath,
+          url: publicUrlData.publicUrl,
+          uploadedAt: new Date().toISOString(),
+        })
+      }
+    }
+
     const profile = {
       id: userId,
       email,
       name,
+      firstName: firstName || '',
+      middleName: middleName || '',
+      lastName: lastName || '',
+      suffix: suffix || '',
       role, // 'student', 'tutor', or 'admin'
       phone,
       bio: bio || '',
+      credentials: uploadedCredentials,
       createdAt: new Date().toISOString(),
       approved: role === 'student' ? true : false, // Students auto-approved, tutors need admin approval
       ...(role === 'tutor' && {
@@ -1519,6 +1618,9 @@ app.get('/make-server-824d015e/admin/credentials/:userId', async (c) => {
 
     const targetUserId = c.req.param('userId')
     const targetProfile = await kv.get(`profile:${targetUserId}`)
+    if (!targetProfile) {
+      return c.json({ error: 'Profile not found' }, 404)
+    }
 
     const certificates = []
     if (targetProfile.certificates) {
@@ -1528,7 +1630,9 @@ app.get('/make-server-824d015e/admin/credentials/:userId', async (c) => {
       }
     }
 
-    return c.json({ profile: targetProfile, certificates })
+    const credentials = Array.isArray(targetProfile.credentials) ? targetProfile.credentials : []
+
+    return c.json({ profile: targetProfile, certificates, credentials })
   } catch (error) {
     console.log(`Error fetching credentials: ${error}`)
     return c.json({ error: 'Failed to fetch credentials' }, 500)
