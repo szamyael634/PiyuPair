@@ -198,7 +198,7 @@ export default function EditProfileModal({ profile, onClose, onSuccess }: EditPr
               </div>
               <div className="grid gap-5 md:grid-cols-2">
                 <div>
-                  <label className="mb-2 block text-sm font-medium text-gray-700">Hourly Rate</label>
+                  <label className="mb-2 block text-sm font-medium text-gray-700">Hourly Rate (PHP)</label>
                   <input
                     type="number"
                     min="0"

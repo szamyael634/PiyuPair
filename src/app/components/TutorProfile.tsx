@@ -3,6 +3,7 @@ import { useNavigate, useParams } from 'react-router';
 import { apiCall } from '../lib/supabase';
 import { ArrowLeft, Star, DollarSign, BookOpen, Award, MessageCircle, Send } from 'lucide-react';
 import { toast } from 'sonner';
+import { formatPHP } from '../lib/currency';
 
 export default function TutorProfile() {
   const navigate = useNavigate();
@@ -82,7 +83,7 @@ export default function TutorProfile() {
               </div>
             </div>
             <div className="text-right">
-              <p className="text-3xl font-bold text-blue-600">${tutor.hourlyRate}</p>
+              <p className="text-3xl font-bold text-blue-600">{formatPHP(tutor.hourlyRate)}</p>
               <p className="text-gray-600">per hour</p>
             </div>
           </div>
@@ -96,7 +97,7 @@ export default function TutorProfile() {
             <div>
               <h3 className="font-semibold text-gray-700 mb-2">Stats</h3>
               <p className="text-gray-600">Total Sessions: {tutor.totalSessions || 0}</p>
-              <p className="text-gray-600">Total Earnings: ${tutor.totalEarnings?.toFixed(2) || '0.00'}</p>
+              <p className="text-gray-600">Total Earnings: {formatPHP(tutor.totalEarnings)}</p>
             </div>
           </div>
 

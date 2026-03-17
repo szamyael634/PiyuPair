@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router';
 import { supabase, apiCall } from '../lib/supabase';
 import { GraduationCap, Users, DollarSign, TrendingUp, CheckCircle, XCircle, Eye, LogOut, Star, Award } from 'lucide-react';
 import { toast } from 'sonner';
+import { formatPHP } from '../lib/currency';
 
 export default function AdminDashboard() {
   const navigate = useNavigate();
@@ -144,7 +145,7 @@ export default function AdminDashboard() {
           />
           <StatCard
             title="Total Commission"
-            value={`$${dashboardData?.stats.totalCommission?.toFixed(2) || '0.00'}`}
+            value={formatPHP(dashboardData?.stats.totalCommission)}
             icon={<DollarSign className="size-8 text-purple-600" />}
             color="purple"
           />
@@ -159,9 +160,30 @@ export default function AdminDashboard() {
           />
           <StatCard
             title="Total Revenue"
-            value={`$${dashboardData?.stats.totalRevenue?.toFixed(2) || '0.00'}`}
+            value={formatPHP(dashboardData?.stats.totalRevenue)}
             icon={<DollarSign className="size-8 text-green-600" />}
             color="green"
+          />
+        </div>
+
+        <div className="grid md:grid-cols-3 gap-6 mb-8">
+          <StatCard
+            title="Avg Commission Rate"
+            value={`${((dashboardData?.stats.averageCommissionRate || 0) * 100).toFixed(2)}%`}
+            icon={<DollarSign className="size-8 text-purple-600" />}
+            color="purple"
+          />
+          <StatCard
+            title="High-Match Commission"
+            value={formatPHP(dashboardData?.stats.commissionByBand?.high?.commissionTotal)}
+            icon={<TrendingUp className="size-8 text-green-600" />}
+            color="green"
+          />
+          <StatCard
+            title="Low-Match Commission"
+            value={formatPHP(dashboardData?.stats.commissionByBand?.low?.commissionTotal)}
+            icon={<TrendingUp className="size-8 text-orange-600" />}
+            color="orange"
           />
         </div>
 
@@ -224,7 +246,7 @@ export default function AdminDashboard() {
                       <span className="font-bold text-gray-400">#{index + 1}</span>
                       <div>
                         <p className="font-semibold text-gray-800">{tutor.name}</p>
-                        <p className="text-sm text-gray-600">${tutor.totalEarnings?.toFixed(2) || '0.00'}</p>
+                        <p className="text-sm text-gray-600">{formatPHP(tutor.totalEarnings)}</p>
                       </div>
                     </div>
                     <span className="text-sm text-gray-500">{tutor.totalSessions} sessions</span>
@@ -285,7 +307,7 @@ function ApprovalCard({ approval, onApprove, onReject, onViewCredentials }: any)
       
       <div className="mb-4">
         <p className="text-sm text-gray-600"><strong>Subjects:</strong> {profile.subjects?.join(', ')}</p>
-        <p className="text-sm text-gray-600"><strong>Rate:</strong> ${profile.hourlyRate}/hr</p>
+        <p className="text-sm text-gray-600"><strong>Rate:</strong> {formatPHP(profile.hourlyRate)}/hr</p>
         <p className="text-sm text-gray-600 mt-2">{profile.bio}</p>
       </div>
 

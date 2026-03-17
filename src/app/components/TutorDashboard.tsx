@@ -4,6 +4,7 @@ import { supabase, apiCall } from '../lib/supabase';
 import { GraduationCap, DollarSign, Users, Star, MessageCircle, LogOut, CheckCircle, XCircle, Calendar, Pencil } from 'lucide-react';
 import { toast } from 'sonner';
 import EditProfileModal from './EditProfileModal';
+import { formatPHP } from '../lib/currency';
 
 export default function TutorDashboard() {
   const navigate = useNavigate();
@@ -169,7 +170,7 @@ export default function TutorDashboard() {
         <div className="grid md:grid-cols-4 gap-6 mb-8">
           <StatCard
             title="Total Earnings"
-            value={`$${profile?.totalEarnings?.toFixed(2) || '0.00'}`}
+            value={formatPHP(profile?.totalEarnings)}
             icon={<DollarSign className="size-8 text-green-600" />}
             color="green"
           />

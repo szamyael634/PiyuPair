@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router';
 import { apiCall } from '../lib/supabase';
 import { Search, Star, DollarSign, BookOpen, ArrowLeft, Filter } from 'lucide-react';
 import { toast } from 'sonner';
+import { formatPHP } from '../lib/currency';
 
 export default function BrowseTutors() {
   const navigate = useNavigate();
@@ -211,7 +212,7 @@ function TutorCard({ tutor }: any) {
           <div className="flex items-center gap-2 text-sm text-gray-600">
             <DollarSign className="size-4" />
             <span className="font-medium">Rate:</span>
-            <span className="font-bold text-blue-600">${tutor.hourlyRate}/hr</span>
+            <span className="font-bold text-blue-600">{formatPHP(tutor.hourlyRate)}/hr</span>
           </div>
 
           <div className="flex items-center gap-2 text-sm text-gray-600">

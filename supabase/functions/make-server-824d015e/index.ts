@@ -867,6 +867,29 @@ app.get('/make-server-824d015e/admin/dashboard', async (c) => {
 
     const totalCommission = allPayments.reduce((sum: number, p: any) => sum + (p.commission || 0), 0)
     const totalRevenue = allPayments.reduce((sum: number, p: any) => sum + (p.amount || 0), 0)
+    const totalCommissionRate = allPayments.reduce((sum: number, p: any) => sum + (p.commissionRate || 0), 0)
+    const averageCommissionRate = allPayments.length > 0 ? totalCommissionRate / allPayments.length : 0
+
+    const commissionByBand = {
+      high: { count: 0, commissionTotal: 0, minScore: 80, maxScore: 100 },
+      medium: { count: 0, commissionTotal: 0, minScore: 60, maxScore: 79 },
+      low: { count: 0, commissionTotal: 0, minScore: 0, maxScore: 59 },
+    }
+
+    for (const payment of allPayments) {
+      const score = Number(payment?.matchScore ?? 0)
+      const commission = Number(payment?.commission ?? 0)
+      if (score >= 80) {
+        commissionByBand.high.count += 1
+        commissionByBand.high.commissionTotal += commission
+      } else if (score >= 60) {
+        commissionByBand.medium.count += 1
+        commissionByBand.medium.commissionTotal += commission
+      } else {
+        commissionByBand.low.count += 1
+        commissionByBand.low.commissionTotal += commission
+      }
+    }
 
     // Top tutors
     const topRatedTutors = tutors
@@ -886,6 +909,8 @@ app.get('/make-server-824d015e/admin/dashboard', async (c) => {
         totalSessions: allSessions.length,
         totalCommission,
         totalRevenue,
+        averageCommissionRate,
+        commissionByBand,
       },
       topRatedTutors,
       topPerformingTutors,

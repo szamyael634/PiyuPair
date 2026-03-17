@@ -204,7 +204,7 @@ export default function Signup() {
 
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Hourly Rate ($)
+                  Hourly Rate (PHP)
                 </label>
                 <input
                   type="number"
