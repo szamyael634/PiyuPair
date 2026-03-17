@@ -303,7 +303,33 @@ export default function Signup() {
       });
 
       if (signUpError) {
-        throw signUpError;
+        const message = String(signUpError.message || '').toLowerCase();
+        const canResend =
+          message.includes('already') ||
+          message.includes('registered') ||
+          message.includes('exists') ||
+          message.includes('rate limit') ||
+          message.includes('security purposes');
+
+        if (!canResend) {
+          throw signUpError;
+        }
+
+        const { error: resendError } = await supabase.auth.resend({
+          type: 'signup',
+          email,
+          options: {
+            emailRedirectTo: redirectTo,
+          },
+        });
+
+        if (resendError) {
+          throw resendError;
+        }
+
+        setVerificationSent(true);
+        toast.success('Verification link sent. Please check your email inbox.');
+        return;
       }
 
       const isAutoConfirmed = Boolean(signUpData.user?.email_confirmed_at);
@@ -312,18 +338,6 @@ export default function Signup() {
         setEmailVerified(true);
         toast.success('Email is already verified for this account.');
         return;
-      }
-
-      const { error: resendError } = await supabase.auth.resend({
-        type: 'signup',
-        email,
-        options: {
-          emailRedirectTo: redirectTo,
-        },
-      });
-
-      if (resendError) {
-        throw resendError;
       }
 
       setVerificationSent(true);
