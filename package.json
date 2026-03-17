@@ -4,6 +4,7 @@
   "version": "0.0.1",
   "type": "module",
   "scripts": {
+    "bootstrap:admin": "node scripts/bootstrap-admin.mjs",
     "build": "vite build",
     "dev": "vite"
   },
