@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router';
 import { supabase } from '../lib/supabase';
 import { apiCall } from '../lib/supabase';
@@ -57,9 +57,11 @@ export default function Signup() {
   const [loading, setLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
-  const [verificationSent, setVerificationSent] = useState(false);
-  const [emailVerified, setEmailVerified] = useState(false);
-  const [sendingVerification, setSendingVerification] = useState(false);
+  const [otpSent, setOtpSent] = useState(false);
+  const [otpVerified, setOtpVerified] = useState(false);
+  const [otpCode, setOtpCode] = useState('');
+  const [sendingOtp, setSendingOtp] = useState(false);
+  const [verifyingOtp, setVerifyingOtp] = useState(false);
   const [formData, setFormData] = useState({
     role: 'student',
     firstName: '',
@@ -88,26 +90,11 @@ export default function Signup() {
 
   const passwordStrength = useMemo(() => getPasswordStrength(formData.password), [formData.password]);
 
-  useEffect(() => {
-    const syncVerificationState = async () => {
-      const { data: userData } = await supabase.auth.getUser();
-      const currentUser = userData.user;
-      const isVerified = Boolean(
-        currentUser?.email_confirmed_at
-        && currentUser?.email
-        && currentUser.email.toLowerCase() === formData.email.trim().toLowerCase()
-      );
-      setEmailVerified(isVerified);
-      if (isVerified) setVerificationSent(true);
-    };
-
-    void syncVerificationState();
-  }, [formData.email]);
-
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => {
     if (e.target.name === 'email') {
-      setVerificationSent(false);
-      setEmailVerified(false);
+      setOtpSent(false);
+      setOtpVerified(false);
+      setOtpCode('');
     }
     setFormData({ ...formData, [e.target.name]: e.target.value });
   };
@@ -161,13 +148,13 @@ export default function Signup() {
       return false;
     }
 
-    if (!verificationSent) {
-      toast.error('Please send a verification link to your email first.');
+    if (!otpSent) {
+      toast.error('Please send the OTP code to your email first.');
       return false;
     }
 
-    if (!emailVerified) {
-      toast.error('Please verify your email using the link sent to your inbox.');
+    if (!otpVerified) {
+      toast.error('Please verify your email using the OTP code.');
       return false;
     }
 
@@ -273,7 +260,7 @@ export default function Signup() {
     }
   };
 
-  const handleSendVerificationLink = async () => {
+  const handleSendOtp = async () => {
     if (!formData.email.trim()) {
       toast.error('Enter your email first.');
       return;
@@ -284,17 +271,15 @@ export default function Signup() {
       return;
     }
 
-    setSendingVerification(true);
+    setSendingOtp(true);
 
     try {
       const email = formData.email.trim().toLowerCase();
-      const redirectTo = `${window.location.origin}/signup`;
 
-      const { data: signUpData, error: signUpError } = await supabase.auth.signUp({
+      const { error } = await supabase.auth.signInWithOtp({
         email,
-        password: formData.password,
         options: {
-          emailRedirectTo: redirectTo,
+          shouldCreateUser: true,
           data: {
             role: formData.role,
             name: fullName || formData.firstName,
@@ -302,51 +287,54 @@ export default function Signup() {
         },
       });
 
-      if (signUpError) {
-        const message = String(signUpError.message || '').toLowerCase();
-        const canResend =
-          message.includes('already') ||
-          message.includes('registered') ||
-          message.includes('exists') ||
-          message.includes('rate limit') ||
-          message.includes('security purposes');
+      if (error) throw error;
 
-        if (!canResend) {
-          throw signUpError;
-        }
-
-        const { error: resendError } = await supabase.auth.resend({
-          type: 'signup',
-          email,
-          options: {
-            emailRedirectTo: redirectTo,
-          },
-        });
-
-        if (resendError) {
-          throw resendError;
-        }
-
-        setVerificationSent(true);
-        toast.success('Verification link sent. Please check your email inbox.');
-        return;
-      }
-
-      const isAutoConfirmed = Boolean(signUpData.user?.email_confirmed_at);
-      if (isAutoConfirmed) {
-        setVerificationSent(true);
-        setEmailVerified(true);
-        toast.success('Email is already verified for this account.');
-        return;
-      }
-
-      setVerificationSent(true);
-      toast.success('Verification link sent. Please check your email inbox.');
+      setOtpSent(true);
+      setOtpVerified(false);
+      toast.success('OTP code sent. Please check your email.');
     } catch (error: any) {
-      console.error('Verification link error:', error);
-      toast.error(error.message || 'Failed to send verification link');
+      console.error('OTP send error:', error);
+      toast.error(error.message || 'Failed to send OTP code');
     } finally {
-      setSendingVerification(false);
+      setSendingOtp(false);
+    }
+  };
+
+  const handleVerifyOtp = async () => {
+    if (!formData.email.trim()) {
+      toast.error('Enter your email first.');
+      return;
+    }
+
+    if (!otpCode.trim()) {
+      toast.error('Enter the OTP code from your email.');
+      return;
+    }
+
+    setVerifyingOtp(true);
+
+    try {
+      const { error } = await supabase.auth.verifyOtp({
+        email: formData.email.trim().toLowerCase(),
+        token: otpCode.trim(),
+        type: 'email',
+      });
+
+      if (error) throw error;
+
+      const { error: passwordError } = await supabase.auth.updateUser({
+        password: formData.password,
+      });
+
+      if (passwordError) throw passwordError;
+
+      setOtpVerified(true);
+      toast.success('Email verified successfully.');
+    } catch (error: any) {
+      console.error('OTP verification error:', error);
+      toast.error(error.message || 'Failed to verify OTP code');
+    } finally {
+      setVerifyingOtp(false);
     }
   };
 
@@ -472,20 +460,43 @@ export default function Signup() {
 
               <div className="rounded-lg border border-blue-100 bg-blue-50 p-4">
                 <p className="text-sm text-blue-900 mb-3">
-                  Email verification is required. We will send a verification link to your email address.
+                  Email verification is required. We will send a one-time code to your email address.
                 </p>
-                <div className="flex flex-col sm:flex-row sm:items-center gap-3">
-                  <button
-                    type="button"
-                    onClick={handleSendVerificationLink}
-                    disabled={sendingVerification}
-                    className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition disabled:opacity-50"
-                  >
-                    {sendingVerification ? 'Sending...' : 'Send Verification Link'}
-                  </button>
-                  <span className={`text-sm ${emailVerified ? 'text-green-700' : 'text-gray-600'}`}>
-                    {emailVerified ? 'Email verified' : verificationSent ? 'Verification link sent. Check your inbox.' : 'Verification not sent yet.'}
-                  </span>
+                <div className="flex flex-col gap-3">
+                  <div className="flex flex-col sm:flex-row sm:items-center gap-3">
+                    <button
+                      type="button"
+                      onClick={handleSendOtp}
+                      disabled={sendingOtp}
+                      className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition disabled:opacity-50"
+                    >
+                      {sendingOtp ? 'Sending...' : otpSent ? 'Resend OTP' : 'Send OTP'}
+                    </button>
+                    <span className={`text-sm ${otpVerified ? 'text-green-700' : 'text-gray-600'}`}>
+                      {otpVerified ? 'Email verified' : otpSent ? 'OTP sent. Check your inbox.' : 'OTP not sent yet.'}
+                    </span>
+                  </div>
+
+                  {otpSent && (
+                    <div className="flex flex-col sm:flex-row sm:items-center gap-3">
+                      <input
+                        type="text"
+                        value={otpCode}
+                        onChange={(e) => setOtpCode(e.target.value)}
+                        className="w-full sm:w-64 px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                        placeholder="Enter OTP code"
+                        maxLength={8}
+                      />
+                      <button
+                        type="button"
+                        onClick={handleVerifyOtp}
+                        disabled={verifyingOtp || otpVerified}
+                        className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition disabled:opacity-50"
+                      >
+                        {verifyingOtp ? 'Verifying...' : otpVerified ? 'Verified' : 'Verify OTP'}
+                      </button>
+                    </div>
+                  )}
                 </div>
               </div>
 
