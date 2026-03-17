@@ -6,6 +6,7 @@ import { toast } from 'sonner';
 import { formatPHP } from '../lib/currency';
 
 export default function AdminDashboard() {
+  const REFRESH_INTERVAL_MS = 10000;
   const navigate = useNavigate();
   const [profile, setProfile] = useState<any>(null);
   const [dashboardData, setDashboardData] = useState<any>(null);
@@ -14,10 +15,29 @@ export default function AdminDashboard() {
   const [selectedUser, setSelectedUser] = useState<any>(null);
 
   useEffect(() => {
-    loadData();
+    void loadData();
+
+    const intervalId = window.setInterval(() => {
+      void loadData(true);
+    }, REFRESH_INTERVAL_MS);
+
+    const handleVisibilityRefresh = () => {
+      if (document.visibilityState === 'visible') {
+        void loadData(true);
+      }
+    };
+
+    window.addEventListener('focus', handleVisibilityRefresh);
+    document.addEventListener('visibilitychange', handleVisibilityRefresh);
+
+    return () => {
+      window.clearInterval(intervalId);
+      window.removeEventListener('focus', handleVisibilityRefresh);
+      document.removeEventListener('visibilitychange', handleVisibilityRefresh);
+    };
   }, []);
 
-  const loadData = async () => {
+  const loadData = async (silent = false) => {
     try {
       const { data: sessionData } = await supabase.auth.getSession();
       if (!sessionData.session) {
@@ -42,7 +62,9 @@ export default function AdminDashboard() {
       setPendingApprovals(approvalsData.approvals);
     } catch (error) {
       console.error('Error loading dashboard:', error);
-      toast.error('Failed to load dashboard');
+      if (!silent) {
+        toast.error('Failed to load dashboard');
+      }
     } finally {
       setLoading(false);
     }
