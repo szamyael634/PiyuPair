@@ -11,7 +11,7 @@ export default function Home() {
         <nav className="container mx-auto px-6 py-4 flex justify-between items-center">
           <div className="flex items-center gap-2">
             <GraduationCap className="size-8" />
-            <span className="text-2xl font-bold">Smart Tutoring</span>
+            <span className="text-2xl font-bold">PiyuPair</span>
           </div>
           <div className="flex gap-4">
             <button
@@ -48,7 +48,7 @@ export default function Home() {
       {/* Features Section */}
       <section className="container mx-auto px-6 py-16">
         <h2 className="text-3xl font-bold text-center mb-12 text-gray-800">
-          Why Choose Smart Tutoring?
+          Why Choose PiyuPair?
         </h2>
         <div className="grid md:grid-cols-3 gap-8">
           <FeatureCard
@@ -138,9 +138,9 @@ export default function Home() {
         <div className="container mx-auto px-6 text-center">
           <div className="flex items-center justify-center gap-2 mb-4">
             <GraduationCap className="size-6" />
-            <span className="text-xl font-bold">Smart Tutoring Marketplace</span>
+            <span className="text-xl font-bold">PiyuPair</span>
           </div>
-          <p className="text-gray-400">© 2026 Smart Tutoring. All rights reserved.</p>
+          <p className="text-gray-400">© 2026 PiyuPair. All rights reserved.</p>
         </div>
       </footer>
     </div>

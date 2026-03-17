@@ -122,7 +122,7 @@ export default function TutorDashboard() {
           <div className="flex justify-between items-center">
             <div className="flex items-center gap-2">
               <GraduationCap className="size-8 text-blue-600" />
-              <span className="text-2xl font-bold text-gray-800">Smart Tutoring</span>
+              <span className="text-2xl font-bold text-gray-800">PiyuPair</span>
             </div>
             <div className="flex items-center gap-4">
               <button

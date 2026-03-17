@@ -1,4 +1,4 @@
-# Smart Tutoring Marketplace
+# PiyuPair
 
 This project is a tutoring platform frontend (Vite + React) backed by Supabase Auth, Edge Functions, and a KV-style table for app data.
 

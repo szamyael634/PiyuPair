@@ -96,7 +96,7 @@ export default function AdminDashboard() {
           <div className="flex justify-between items-center">
             <div className="flex items-center gap-2">
               <GraduationCap className="size-8 text-blue-600" />
-              <span className="text-2xl font-bold text-gray-800">Smart Tutoring Admin</span>
+              <span className="text-2xl font-bold text-gray-800">PiyuPair Admin</span>
             </div>
             <div className="flex items-center gap-3">
               <div className="text-right">
@@ -255,9 +255,10 @@ function StatCard({ title, value, icon, color }: any) {
     purple: 'bg-purple-50',
     indigo: 'bg-indigo-50',
   };
+  const backgroundClass = colorClasses[color as keyof typeof colorClasses] || colorClasses.blue;
 
   return (
-    <div className={`${colorClasses[color]} rounded-xl p-6`}>
+    <div className={`${backgroundClass} rounded-xl p-6`}>
       <div className="flex justify-between items-start mb-4">
         <div>
           <p className="text-gray-600 text-sm mb-1">{title}</p>

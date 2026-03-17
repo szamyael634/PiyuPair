@@ -74,7 +74,7 @@ export default function Signup() {
       <div className="bg-white rounded-2xl shadow-xl p-8 w-full max-w-2xl">
         <div className="flex items-center justify-center gap-2 mb-6">
           <GraduationCap className="size-10 text-blue-600" />
-          <span className="text-2xl font-bold text-gray-800">Smart Tutoring</span>
+          <span className="text-2xl font-bold text-gray-800">PiyuPair</span>
         </div>
 
         <h1 className="text-3xl font-bold text-center mb-2 text-gray-800">Create Account</h1>

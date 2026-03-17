@@ -1,4 +1,4 @@
-# Smart Tutoring Marketplace - User Guide
+# PiyuPair - User Guide
 
 ## Overview
 A comprehensive tutoring marketplace platform with role-based access for Students, Tutors, and Administrators.
