@@ -1,0 +1,13 @@
+# Local secrets / notes
+Keys.md
+
+# Vite / Node
+node_modules/
+dist/
+
+# Env files
+.env
+.env.*
+
+# Supabase local dev artifacts
+.supabase/
